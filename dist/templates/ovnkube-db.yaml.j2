@@ -67,10 +67,10 @@ spec:
 
       # nb-ovsdb - v3
       - name: nb-ovsdb
-        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        image: "{{ ovn_ovsdb_etcd_image | default('docker.io/aidans/ovsdb-etcd:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "nb-ovsdb"]
+        command: ["/root/ovnkube.sh", "nb-ovsdb-etcd"]
 
         securityContext:
           runAsUser: 0
@@ -105,8 +105,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOGLEVEL_NB
-          value: "{{ ovn_loglevel_nb }}"
+        - name: OVSDB_ETCD_NB_LOG_LEVEL
+          value: "6"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -124,20 +124,18 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_NB_PORT
           value: "{{ ovn_nb_port }}"
-        readinessProbe:
-          exec:
-            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
-          initialDelaySeconds: 30
-          timeoutSeconds: 30
-          periodSeconds: 60
+        - name: MAX_RETRY
+          value: "10"
+        - name: RETRY_TIME_OUT
+          value: "5000"
       # end of container
 
       # sb-ovsdb - v3
       - name: sb-ovsdb
-        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        image: "{{ ovn_ovsdb_etcd_image | default('docker.io/aidans/ovsdb-etcd:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "sb-ovsdb"]
+        command: ["/root/ovnkube.sh", "sb-ovsdb-etcd"]
 
         securityContext:
           runAsUser: 0
@@ -172,8 +170,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOGLEVEL_SB
-          value: "{{ ovn_loglevel_sb }}"
+        - name: OVSDB_ETCD_SB_LOG_LEVEL
+          value: "6"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -191,12 +189,50 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_SB_PORT
           value: "{{ ovn_sb_port }}"
-        readinessProbe:
-          exec:
-            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
-          initialDelaySeconds: 30
-          timeoutSeconds: 30
-          periodSeconds: 60
+        - name: MAX_RETRY
+          value: "10"
+        - name: RETRY_TIME_OUT
+          value: "5000"
+
+      # end of container
+
+      # etcd
+      - name: etcd
+        image: "{{ ovn_etcd_image | default('docker.io/aidans/etcd:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+        command: ["/root/ovnkube.sh", "etcd"]
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # ovn db is stored in the pod in /etc/openvswitch
+        # (or in /etc/ovn if OVN from new repository is used)
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVSDB_ETCD_MAX_TXN_OPS
+          value: "5120"
+        - name: OVSDB_ETCD_MAX_REQUEST_BYTES
+          value: "157286400"
 
       # end of container
 

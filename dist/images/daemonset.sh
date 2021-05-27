@@ -1,5 +1,5 @@
 #!/bin/bash
-#set -x
+set -x
 
 #Always exit on errors
 set -e
@@ -11,6 +11,8 @@ pip freeze | grep j2cli || pip install j2cli[yaml] --user
 export PATH=~/.local/bin:$PATH
 
 OVN_IMAGE=""
+OVN_ETCD_IMAGE=""
+OVN_OVSDB_ETCD_IMAGE=""
 OVN_IMAGE_PULL_POLICY=""
 OVN_NET_CIDR=""
 OVN_SVC_DIDR=""
@@ -55,6 +57,12 @@ while [ "$1" != "" ]; do
   case $PARAM in
   --image)
     OVN_IMAGE=$VALUE
+    ;;
+  --etcd-image)
+    OVN_ETCD_IMAGE=$VALUE
+    ;;
+  --ovsdb-etcd-image)
+    OVN_OVSDB_ETCD_IMAGE=$VALUE
     ;;
   --image-pull-policy)
     OVN_IMAGE_PULL_POLICY=$VALUE
@@ -192,6 +200,12 @@ done
 
 image=${OVN_IMAGE:-"docker.io/ovnkube/ovn-daemonset:latest"}
 echo "image: ${image}"
+
+etcd_image=${OVN_ETCD_IMAGE:-"docker.io/aidans/etcd:latest"}
+echo "etcd_image: ${etcd_image}"
+
+ovsdb_etcd_image=${OVN_OVSDB_ETCD_IMAGE:-"docker.io/aidans/ovsdb-etcd:latest"}
+echo "ovsdb_etcd_image: ${ovsdb_etcd_image}"
 
 image_pull_policy=${OVN_IMAGE_PULL_POLICY:-"IfNotPresent"}
 echo "imagePullPolicy: ${image_pull_policy}"
@@ -351,6 +365,8 @@ ovn_image=${image} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \
+  ovn_etcd_image=${etcd_image} \
+  ovn_ovsdb_etcd_image=${ovsdb_etcd_image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_nb=${ovn_loglevel_nb} \
   ovn_loglevel_sb=${ovn_loglevel_sb} \

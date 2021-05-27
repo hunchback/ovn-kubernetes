@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -x
+
 export KUBECONFIG=${HOME}/admin.conf
 
 run_kubectl() {
@@ -65,6 +67,8 @@ usage() {
     echo "-gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode."
     echo "                                   DEFAULT: local."
     echo "-ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "--ovn-etcd-image                   Use the specified docker image instead of default."
+    echo "--ovn-ovsdb-etcd-image             Use the specified docker image instead of default."
     echo "-ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5."
     echo "-nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5"
     echo "-dbl | --dbchecker-loglevel        Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5."
@@ -136,6 +140,12 @@ parse_args() {
             -ov | --ovn-image )           	    shift
                                           	    OVN_IMAGE=$1
                                           	    ;;
+            --ovn-ovsdb-etcd-image )            shift
+                                                OVN_OVSDB_ETCD_IMAGE=$1
+                                                ;;
+            --ovn-etcd-image )                  shift
+                                                OVN_ETCD_IMAGE=$1
+                                                ;;
             -ml  | --master-loglevel )          shift
                                                 if ! [[ "$1" =~ ^[0-9]$ ]]; then
                                                     echo "Invalid master-loglevel: $1"
@@ -210,6 +220,8 @@ print_params() {
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "OVN_ETCD_IMAGE = $OVN_ETCD_IMAGE"
+     echo "OVN_OVSDB_ETCD_IMAGE = $OVN_OVSDB_ETCD_IMAGE"
      echo "MASTER_LOG_LEVEL = $MASTER_LOG_LEVEL"
      echo "NODE_LOG_LEVEL = $NODE_LOG_LEVEL"
      echo "DBCHECKER_LOG_LEVEL = $DBCHECKER_LOG_LEVEL"
@@ -246,6 +258,8 @@ set_default_params() {
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
   OVN_IMAGE=${OVN_IMAGE:-local}
+  OVN_ETCD_IMAGE=${OVN_ETCD_IMAGE}
+  OVN_OVSDB_ETCD_IMAGE=${OVN_OVSDB_ETCD_IMAGE}
   MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-5}
   NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-5}
   DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-5}
@@ -464,6 +478,8 @@ create_ovn_kube_manifests() {
   pushd ../dist/images
   ./daemonset.sh \
     --image="${OVN_IMAGE}" \
+    --ovsdb-etcd-image="${OVN_OVSDB_ETCD_IMAGE}" \
+    --etcd-image="${OVN_ETCD_IMAGE}" \
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
@@ -491,6 +507,12 @@ create_ovn_kube_manifests() {
 
 install_ovn_image() {
   kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+  if [ -n "${OVN_ETCD_IMAGE}" ]; then
+	  kind load docker-image "${OVN_ETCD_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+  fi
+  if [ -n "${OVN_OVSDB_ETCD_IMAGE}" ]; then
+	  kind load docker-image "${OVN_OVSDB_ETCD_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+  fi
 }
 
 install_ovn() {

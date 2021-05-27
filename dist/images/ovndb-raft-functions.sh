@@ -78,6 +78,7 @@ check_ovnkube_db_ep() {
 
   # TODO: Right now only checks for NB ovsdb instances
   echo "======= checking [${dbaddr}]:${dbport} OVSDB instance ==============="
+  echo "ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:[${dbaddr}]:${dbport}"
   ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:[${dbaddr}]:${dbport} >/dev/null
   if [[ $? != 0 ]]; then
     return 1

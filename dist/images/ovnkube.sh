@@ -29,6 +29,9 @@ fi
 #    display        Displays log files
 #    display_env    Displays environment variables
 #    ovn_debug      Displays ovn/ovs configuration and flows
+#    etcd           Runs etcd server
+#    nb-ovsdb-etcd  Runs NB OVSDB-etcd server
+#    sb-ovsdb-etcd  Runs SB OVSDB-etcd server
 
 # NOTE: The script/image must be compatible with the daemonset.
 # This script supports version 3 daemonsets
@@ -73,6 +76,7 @@ fi
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
+# OVSDB_PREFIX - ovsdb etcd key prefix
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -206,6 +210,16 @@ ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
+
+# OVSDB-etcd variables
+ovsdb_etcd_members=${OVSDB_ETCD_MEMBERS:-"localhost:2479"}
+ovsdb_etcd_max_txn_ops=${OVSDB_ETCD_MAX_TXN_OPS:-"5120"}
+ovsdb_etcd_max_request_bytes=${OVSDB_ETCD_MAX_REQUEST_BYTES:-"157286400"}
+
+ovsdb_etcd_schemas_dir=${OVSDB_ETCD_SCHEMAS_DIR:-/root/ovsdb-etcd/schemas}
+ovsdb_etcd_prefix=${OVSDB_ETCD_PREFIX:-"ovsdb"}
+ovsdb_etcd_nb_log_level=${OVSDB_ETCD_NB_LOG_LEVEL:-"5"}
+ovsdb_etcd_sb_log_level=${OVSDB_ETCD_SB_LOG_LEVEL:-"5"}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -407,7 +421,7 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master" | "ovn-dbchecker")
+  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnnb_etcd" | "ovnsb_etcd")
     # just check for presence of pid
     ;;
   "ovnnb_db" | "ovnsb_db")
@@ -467,6 +481,8 @@ display() {
   display_file "ovnkube" ${OVN_RUNDIR}/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
   display_file "run-nbctld" ${OVN_RUNDIR}/ovn-nbctl.pid ${OVN_LOGDIR}/ovn-nbctl.log
   display_file "ovn-dbchecker" ${OVN_RUNDIR}/ovn-dbchecker.pid ${OVN_LOGDIR}/ovn-dbchecker.log
+  display_file "nb-ovsdb-etcd" ${OVN_RUNDIR}/ovnnb_etcd.pid ${OVN_LOGDIR}/nb-ovsdb-etcd.log
+  display_file "sb-ovasb-etcd" ${OVN_RUNDIR}/ovnsb_etcd.pid ${OVN_LOGDIR}/sb-ovsdb-etcd.log
 }
 
 setup_cni() {
@@ -1195,6 +1211,62 @@ ovs-metrics() {
   exit 1
 }
 
+etcd () {
+  echo "================= start etcd server ============================ "
+  /usr/local/bin/etcd --data-dir /etc/openvswitch/ --listen-peer-urls http://localhost:2480 \
+  --listen-client-urls http://localhost:2479 --advertise-client-urls http://localhost:2479 \
+  --max-txn-ops ${ovsdb_etcd_max_txn_ops} --max-request-bytes ${ovsdb_etcd_max_request_bytes}
+}
+
+etcd_ready() {
+  curl -s http://127.0.0.1:2479 > /dev/null
+}
+
+nb-ovsdb-etcd () {
+  check_ovn_daemonset_version "3"
+  pid_file=${OVN_RUNDIR}/ovnnb_etcd.pid
+  rm -f ${pid_file}
+
+
+  echo "=============== run-nb-ovsdb-etcd (wait for etcd_ready)"
+  wait_for_event etcd_ready
+  echo "================= start nb-ovsdb-etcd server ============================ "
+  /root/server -logtostderr=false -log_file=${OVN_LOGDIR}/nb-ovsdb-etcd.log -v=${ovsdb_etcd_nb_log_level} -tcp-address=:${ovn_nb_port} \
+  -etcd-members=${ovsdb_etcd_members} -schema-basedir=${ovsdb_etcd_schemas_dir} \
+  -database-prefix=${ovsdb_etcd_prefix} -service-name=nb -schema-file=ovn-nb.ovsschema -pid-file=${pid_file} \
+  -load-server-data=false &
+
+  sleep 5
+  ovn_tail_pid=$(<"${pid_file}")
+
+  process_healthy ovnnb_etcd ${ovn_tail_pid}
+  echo "=============== run nb-ovsdb-etcd ========== terminated"
+}
+
+sb-ovsdb-etcd () {
+  check_ovn_daemonset_version "3"
+  pid_file=${OVN_RUNDIR}/ovnsb_etcd.pid
+  rm -f ${pid_file}
+
+  echo "=============== run-sb-ovsdb-etcd (wait for etcd_ready)"
+  wait_for_event etcd_ready
+  echo "================= start sb-ovsdb-etcd server ============================ "
+  /root/server -logtostderr=false -log_file=${OVN_LOGDIR}/sb-ovsdb-etcd.log -v=${ovsdb_etcd_sb_log_level} -tcp-address=:${ovn_sb_port} \
+  -etcd-members=${ovsdb_etcd_members} -schema-basedir=${ovsdb_etcd_schemas_dir} \
+  -database-prefix=${ovsdb_etcd_prefix} -service-name=sb -schema-file=ovn-sb.ovsschema -pid-file=${pid_file} \
+  -load-server-data=false &
+
+  sleep 5
+  ovn_tail_pid=$(<"${pid_file}")
+  # create the ovnkube-db endpoints
+  wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
+  set_ovnkube_db_ep ${ovn_db_host}
+
+  process_healthy ovnsb_etcd ${ovn_tail_pid}
+  echo "=============== run sb-ovsdb-etcd ========== terminated"
+}
+
+
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
 echo " ==================== command: ${cmd}"
@@ -1273,11 +1345,20 @@ case ${cmd} in
 "ovs-metrics")
   ovs-metrics
   ;;
+"etcd")
+  etcd
+  ;;
+"nb-ovsdb-etcd")
+  nb-ovsdb-etcd
+  ;;
+"sb-ovsdb-etcd")
+  sb-ovsdb-etcd
+  ;;
 *)
   echo "invalid command ${cmd}"
   echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master " \
     "ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server " \
-    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
+    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft etcd nb-ovsdb-etcd sb-ovsdb-etcd "
   exit 0
   ;;
 esac
