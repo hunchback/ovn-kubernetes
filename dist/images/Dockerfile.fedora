@@ -27,6 +27,8 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
+COPY ovn-nbctl /usr/bin/ovn-nbctl
+
 RUN mkdir -p /var/run/openvswitch
 
 RUN koji download-build $ovnver --arch=x86_64
